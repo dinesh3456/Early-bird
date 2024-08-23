@@ -1,0 +1,44 @@
+version: 0.2
+env:
+ shell: bash
+ git-credential-helper: yes
+ variables:
+  HOME: /root
+  PATH: /root/.nvm/versions/node/v18.13.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  NVM_BIN: NVM_BIN=/root/.nvm/versions/node/v18.13.0/bin
+  NVM_DIR: /$HOME/.nvm
+  _: /usr/bin/env
+  NVM_INC: /root/.nvm/versions/node/v18.13.0/include/node
+  ENV: dev-mint
+
+phases:
+ install:
+  runtime-versions:
+   nodejs: 20
+  commands:
+ pre_build:
+  commands:
+   - npm i -f
+   # Extract the bucket name from the S3 URI
+   - export BUCKET_NAME=$(echo $S3_BUCKET | sed -e 's|^s3://||' -e 's|/.*$||')
+ build:
+  commands:
+   - echo Build starting
+   - export REACT_APP_ENVIRONMENT=$REACT_APP_ENVIRONMENT
+   - export REACT_APP_VERSION=$npm_package_version
+   - echo Start build for $REACT_APP_ENVIRONMENT
+   - npm run build
+  finally:
+   - echo Build complete - final block now.
+
+ post_build:
+  commands:
+   - echo Installing for $ENV
+   # Use the extracted BUCKET_NAME in the sync command
+   - aws s3 sync ./build s3://$BUCKET_NAME --delete --cache-control "public,max-age=43200" --exclude "*.map"
+   - export CACHE_DISABLED_PARAMS="--metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate --acl public-read"
+   #- aws s3 cp s3://$BUCKET_NAME/service-worker.js s3://$BUCKET_NAME/service-worker.js --content-type application/javascript --metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate --acl public-read
+   - aws s3 cp s3://$BUCKET_NAME/index.html s3://$BUCKET_NAME/index.html --content-type text/html --metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate --acl public-read
+   - aws s3 cp s3://$BUCKET_NAME/manifest.json s3://$BUCKET_NAME/manifest.json --content-type application/json --metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate --acl public-read
+   - aws s3 cp s3://$BUCKET_NAME/asset-manifest.json s3://$BUCKET_NAME/asset-manifest.json --content-type application/json --metadata-directive REPLACE --cache-control max-age=0,no-cache,no-store,must-revalidate --acl public-read
+   - aws cloudfront create-invalidation --distribution-id $CF_DIST --paths /service-worker.js /index.html /manifest.json /static
